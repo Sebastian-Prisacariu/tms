@@ -106,33 +106,106 @@ The `yield* ApiHttpClient` call requests the `ApiHttpClient` service from the co
 
 ---
 
-## 3. Implementing with `Layer.succeed`
+## 3. Configuration with `Config`
 
-Use `Layer.succeed` when the implementation has no dependencies — typically for configuration or simple adapters that only read from `import.meta.env`.
+For environment variables and app settings, use Effect's built-in `Config` module instead of creating a custom `Context.Tag` service. `Config` provides typed access to configuration values with built-in validation and error messages.
+
+### Reading Config Values
 
 ```ts
-// src/services/config.service.ts
-import { Context, Layer } from 'effect'
+import { Config, Effect } from 'effect'
 
-class ConfigService extends Context.Tag('ConfigService')<
-  ConfigService,
-  {
-    readonly apiBaseUrl: string
-    readonly environment: string
-    readonly authTokenKey: string
-  }
->() {}
+// Read a single config value — fails with ConfigError if missing
+const apiUrl = Config.string('VITE_API_URL')
+const mode = Config.string('MODE')
 
-const ConfigServiceLive = Layer.succeed(ConfigService, {
-  apiBaseUrl: import.meta.env.VITE_API_URL,
-  environment: import.meta.env.MODE,
-  authTokenKey: 'tms_auth_token',
+// With defaults
+const authTokenKey = Config.withDefault(Config.string('AUTH_TOKEN_KEY'), 'tms_auth_token')
+const pageSize = Config.withDefault(Config.integer('DEFAULT_PAGE_SIZE'), 20)
+
+// Use in an Effect
+const program = Effect.gen(function* () {
+  const url = yield* apiUrl
+  const env = yield* mode
+  console.log(`API: ${url}, Mode: ${env}`)
 })
-
-export { ConfigService, ConfigServiceLive }
 ```
 
-`Layer.succeed` is synchronous — no `Effect.gen` needed. The values are read once at module evaluation time, which is correct for environment variables that are baked in at build time.
+### Providing Config via ConfigProvider
+
+In a Vite app, environment variables come from `import.meta.env`. Wire them up once via `ConfigProvider`:
+
+```ts
+// src/lib/config.ts
+import { ConfigProvider, Layer } from 'effect'
+
+/**
+ * Provides all import.meta.env values to Effect's Config system.
+ * Place this at the bottom of the layer graph so all services can
+ * read config via Config.string('VITE_API_URL') etc.
+ */
+export const AppConfigLive = Layer.setConfigProvider(
+  ConfigProvider.fromJson(import.meta.env)
+)
+```
+
+### Using Config in Services
+
+Services read config values directly via `Config` — no need for a `ConfigService` tag:
+
+```ts
+// src/lib/http-client.ts
+import { HttpClient, HttpClientRequest } from '@effect/platform'
+import { Config, Effect, Layer, Schedule } from 'effect'
+
+export const ApiHttpClientLive = Layer.effect(
+  ApiHttpClient,
+  Effect.gen(function* () {
+    const apiUrl = yield* Config.string('VITE_API_URL')
+    const baseClient = yield* HttpClient.HttpClient
+
+    return baseClient.pipe(
+      HttpClient.mapRequest((req) =>
+        req.pipe(
+          HttpClientRequest.prependUrl(apiUrl),
+          HttpClientRequest.acceptJson,
+        )
+      ),
+      HttpClient.filterStatusOk,
+      HttpClient.retryTransient({
+        times: 3,
+        schedule: Schedule.exponential('200 millis'),
+      }),
+    )
+  })
+).pipe(Layer.provide(BrowserHttpClient.layer))
+```
+
+### When to Use `Config` vs `Context.Tag`
+
+| Concern | Use `Config` | Use `Context.Tag` |
+|---|---|---|
+| Environment variables | `Config.string('VITE_API_URL')` | — |
+| Static app settings | `Config.withDefault(Config.integer('PAGE_SIZE'), 20)` | — |
+| Service with methods | — | `class BookingApi extends Context.Tag(...)` |
+| Stateful service (token mgmt, caching) | — | `class AuthService extends Context.Tag(...)` |
+
+**Rule:** If it's a value you read, use `Config`. If it's a service with behavior (methods, state), use `Context.Tag`.
+
+### Implementing with `Layer.succeed`
+
+`Layer.succeed` is still useful for services with no dependencies — simple adapters or in-memory implementations:
+
+```ts
+// Test mock — no deps, no config, just a static implementation
+const MockBookingApi = Layer.succeed(BookingApi, {
+  list: () => Effect.succeed({ items: [], total: 0, page: 1, pageSize: 20 }),
+  getById: (id) => Effect.fail(new BookingNotFound({ bookingId: id })),
+  create: (input) => Effect.die('not implemented'),
+  update: () => Effect.die('not implemented'),
+  delete: () => Effect.die('not implemented'),
+})
+```
 
 ---
 
@@ -161,18 +234,18 @@ BrowserHttpClient.layer          ← platform primitive (@effect/platform-browse
 import { Layer } from 'effect'
 import { BrowserHttpClient } from '@effect/platform-browser'
 import { ApiHttpClientLive } from '~/lib/http-client'
-import { ConfigServiceLive } from '~/services/config.service'
+import { AppConfigLive } from '~/lib/config'
 import { BookingApiLive } from '~/features/booking/api/booking.api'
 import { DriverApiLive } from '~/features/driver/api/driver.api'
 import { VehicleApiLive } from '~/features/vehicle/api/vehicle.api'
 
-// Bottom of the graph: platform HTTP + config
+// Bottom of the graph: platform HTTP + config provider
 const BaseLayer = Layer.mergeAll(
   BrowserHttpClient.layer,
-  ConfigServiceLive,
+  AppConfigLive,
 )
 
-// ApiHttpClientLive needs ConfigService and BrowserHttpClient
+// ApiHttpClientLive reads Config.string('VITE_API_URL') and BrowserHttpClient
 const HttpLayer = ApiHttpClientLive.pipe(Layer.provide(BaseLayer))
 
 // Feature API layers all need ApiHttpClient
@@ -241,7 +314,8 @@ const program = Effect.gen(function* () {
   const api = yield* BookingApi
   const booking = yield* api.getById('b-123').pipe(
     Effect.catchTag('BookingNotFound', (e) =>
-      Effect.fail(new Error(`Booking ${e.bookingId} does not exist`)),
+      // handle missing booking — redirect, show fallback, etc.
+      Effect.succeed(null),
     ),
   )
   return booking

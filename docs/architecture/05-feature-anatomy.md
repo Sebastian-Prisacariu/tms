@@ -173,7 +173,8 @@ const program = Effect.gen(function* () {
   const api = yield* BookingApi
   return yield* api.getById('b-123').pipe(
     Effect.catchTag('BookingNotFound', (e) =>
-      Effect.fail(new Error(`Booking ${e.bookingId} does not exist`)),
+      // handle missing booking — show fallback, log, etc.
+      Effect.succeed(null),
     ),
   )
 })
@@ -494,8 +495,9 @@ import {
   useAtomValue,
 } from '@effect-atom/atom-react'
 import { Result } from '@effect-atom/atom'
-import { Option } from 'effect'
+import { Cause, Option } from 'effect'
 import { Booking } from '../state/booking.atoms'
+import { BookingNotFound } from '../contract/errors'
 import type { BookingFilters, CreateBookingInput, UpdateBookingInput } from '../contract/schemas'
 
 // ---------------------------------------------------------------------------
@@ -525,7 +527,7 @@ export function useBooking(id: string) {
   const booking = result.value.items.find((b) => b.id === id)
   const singleResult = booking
     ? Result.success(booking)
-    : Result.failure(new Error(`Booking ${id} not found`) as never)
+    : Result.failure(Cause.fail(new BookingNotFound({ bookingId: id })))
 
   return { result: singleResult }
 }

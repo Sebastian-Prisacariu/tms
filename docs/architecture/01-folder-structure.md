@@ -52,14 +52,14 @@ src/
 │   └── use-debounce.ts
 │
 ├── lib/                            # Shared utilities & infrastructure
+│   ├── config.ts                   # AppConfigLive — ConfigProvider from import.meta.env
 │   ├── http-client.ts              # Configured Effect HttpClient (auth, base URL)
 │   ├── providers.tsx               # AtomProvider (RegistryProvider wrapper)
 │   ├── cn.ts                       # clsx + tailwind-merge utility
 │   └── runtime.ts                  # Atom.runtime setup with AppLayer
 │
 ├── services/                       # Shared Effect services
-│   ├── auth.service.ts             # AuthService (token management)
-│   └── config.service.ts           # ConfigService (env vars)
+│   └── auth.service.ts             # AuthService (token management)
 │
 ├── routes/                         # TanStack Router file-based routes
 │   ├── __root.tsx                  # Root layout
