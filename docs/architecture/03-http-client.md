@@ -22,12 +22,12 @@ See [02-effect-services.md](./02-effect-services.md) for the general service pat
 **`src/lib/http-client.ts`**
 
 ```ts
-import { HttpClient, HttpClientRequest } from '@effect/platform'
-import { BrowserHttpClient } from '@effect/platform-browser'
-import { Context, Effect, Layer, Schedule } from 'effect'
+import { HttpClient, HttpClientRequest } from "@effect/platform";
+import { BrowserHttpClient } from "@effect/platform-browser";
+import { Context, Effect, Layer, Schedule } from "effect";
 
 // Tag — identifies this service in the Effect context
-export class ApiHttpClient extends Context.Tag('ApiHttpClient')<
+export class ApiHttpClient extends Context.Tag("ApiHttpClient")<
   ApiHttpClient,
   HttpClient.HttpClient
 >() {}
@@ -36,26 +36,24 @@ export class ApiHttpClient extends Context.Tag('ApiHttpClient')<
 export const ApiHttpClientLive = Layer.effect(
   ApiHttpClient,
   Effect.gen(function* () {
-    const baseClient = yield* HttpClient.HttpClient
+    const baseClient = yield* HttpClient.HttpClient;
     return baseClient.pipe(
       HttpClient.mapRequest((req) =>
         req.pipe(
           HttpClientRequest.prependUrl(import.meta.env.VITE_API_URL),
-          // Sets Accept: application/json header
-          // (Content-Type is set automatically by schemaBodyJson when sending a body)
           HttpClientRequest.acceptJson,
-        )
+        ),
       ),
       // Turns any non-2xx response into a ResponseError in the error channel
       HttpClient.filterStatusOk,
       // Retry on transient errors: network failures, timeouts, and status >= 429
       HttpClient.retryTransient({
         times: 3,
-        schedule: Schedule.exponential('200 millis'),
+        schedule: Schedule.exponential("200 millis"),
       }),
-    )
-  })
-).pipe(Layer.provide(BrowserHttpClient.layer))
+    );
+  }),
+).pipe(Layer.provide(BrowserHttpClient.layer));
 ```
 
 `BrowserHttpClient.layer` provides the underlying `fetch`-based `HttpClient.HttpClient`. `ApiHttpClientLive` depends on it and is self-contained — callers just provide `ApiHttpClientLive` to their layer graph.
@@ -69,12 +67,12 @@ When auth tokens must be read at request time (not at layer construction time), 
 **`src/lib/http-client.ts`** (auth-aware variant)
 
 ```ts
-import { HttpClient, HttpClientRequest } from '@effect/platform'
-import { BrowserHttpClient } from '@effect/platform-browser'
-import { Context, Effect, Layer, Schedule } from 'effect'
-import { AuthService } from '~/services/auth.service'
+import { HttpClient, HttpClientRequest } from "@effect/platform";
+import { BrowserHttpClient } from "@effect/platform-browser";
+import { Context, Effect, Layer, Schedule } from "effect";
+import { AuthService } from "~/services/auth.service";
 
-export class ApiHttpClient extends Context.Tag('ApiHttpClient')<
+export class ApiHttpClient extends Context.Tag("ApiHttpClient")<
   ApiHttpClient,
   HttpClient.HttpClient
 >() {}
@@ -82,8 +80,8 @@ export class ApiHttpClient extends Context.Tag('ApiHttpClient')<
 export const ApiHttpClientLive = Layer.effect(
   ApiHttpClient,
   Effect.gen(function* () {
-    const auth = yield* AuthService
-    const baseClient = yield* HttpClient.HttpClient
+    const auth = yield* AuthService;
+    const baseClient = yield* HttpClient.HttpClient;
     return baseClient.pipe(
       HttpClient.mapRequestEffect((req) =>
         Effect.map(auth.getToken, (token) =>
@@ -91,26 +89,26 @@ export const ApiHttpClientLive = Layer.effect(
             HttpClientRequest.prependUrl(import.meta.env.VITE_API_URL),
             HttpClientRequest.acceptJson,
             HttpClientRequest.bearerToken(token),
-          )
-        )
+          ),
+        ),
       ),
       HttpClient.filterStatusOk,
       HttpClient.retryTransient({
         times: 3,
-        schedule: Schedule.exponential('200 millis'),
+        schedule: Schedule.exponential("200 millis"),
       }),
-    )
-  })
-).pipe(Layer.provide(BrowserHttpClient.layer))
+    );
+  }),
+).pipe(Layer.provide(BrowserHttpClient.layer));
 ```
 
 The key difference:
 
-| | `mapRequest` | `mapRequestEffect` |
-|---|---|---|
-| Callback return type | `HttpClientRequest` | `Effect<HttpClientRequest>` |
-| Can yield Effects | No | Yes |
-| Use for | Static transforms (base URL, fixed headers) | Dynamic transforms (token lookup, signing) |
+|                      | `mapRequest`                                | `mapRequestEffect`                         |
+| -------------------- | ------------------------------------------- | ------------------------------------------ |
+| Callback return type | `HttpClientRequest`                         | `Effect<HttpClientRequest>`                |
+| Can yield Effects    | No                                          | Yes                                        |
+| Use for              | Static transforms (base URL, fixed headers) | Dynamic transforms (token lookup, signing) |
 
 ---
 
@@ -123,22 +121,26 @@ Each feature owns its API service in `src/features/{name}/api/{name}.api.ts`. Th
 **`src/features/booking/api/booking.api.ts`**
 
 ```ts
-import { HttpClient, HttpClientRequest, HttpClientResponse } from '@effect/platform'
-import { Context, Effect, Layer } from 'effect'
-import { Schema } from 'effect'
-import { ApiHttpClient } from '~/lib/http-client'
+import {
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+} from "@effect/platform";
+import { Context, Effect, Layer } from "effect";
+import { Schema } from "effect";
+import { ApiHttpClient } from "~/lib/http-client";
 import {
   BookingRequest,
   BookingResponse,
   BookingListResponse,
   BookingUpdateRequest,
   BookingPatchRequest,
-} from '../contract/schemas'
+} from "../contract/schemas";
 import {
   BookingNotFound,
   BookingValidationError,
   ApiRequestFailed,
-} from '../contract/errors'
+} from "../contract/errors";
 
 // --- Service interface ---
 
@@ -146,27 +148,41 @@ interface BookingApiShape {
   readonly getAll: Effect.Effect<
     Schema.Schema.Type<typeof BookingListResponse>,
     ApiRequestFailed
-  >
+  >;
   readonly getById: (
-    id: string
-  ) => Effect.Effect<Schema.Schema.Type<typeof BookingResponse>, BookingNotFound | ApiRequestFailed>
+    id: string,
+  ) => Effect.Effect<
+    Schema.Schema.Type<typeof BookingResponse>,
+    BookingNotFound | ApiRequestFailed
+  >;
   readonly create: (
-    body: Schema.Schema.Type<typeof BookingRequest>
-  ) => Effect.Effect<Schema.Schema.Type<typeof BookingResponse>, BookingValidationError | ApiRequestFailed>
+    body: Schema.Schema.Type<typeof BookingRequest>,
+  ) => Effect.Effect<
+    Schema.Schema.Type<typeof BookingResponse>,
+    BookingValidationError | ApiRequestFailed
+  >;
   readonly update: (
     id: string,
-    body: Schema.Schema.Type<typeof BookingUpdateRequest>
-  ) => Effect.Effect<Schema.Schema.Type<typeof BookingResponse>, BookingNotFound | ApiRequestFailed>
+    body: Schema.Schema.Type<typeof BookingUpdateRequest>,
+  ) => Effect.Effect<
+    Schema.Schema.Type<typeof BookingResponse>,
+    BookingNotFound | ApiRequestFailed
+  >;
   readonly patch: (
     id: string,
-    body: Schema.Schema.Type<typeof BookingPatchRequest>
-  ) => Effect.Effect<Schema.Schema.Type<typeof BookingResponse>, BookingNotFound | ApiRequestFailed>
-  readonly remove: (id: string) => Effect.Effect<void, BookingNotFound | ApiRequestFailed>
+    body: Schema.Schema.Type<typeof BookingPatchRequest>,
+  ) => Effect.Effect<
+    Schema.Schema.Type<typeof BookingResponse>,
+    BookingNotFound | ApiRequestFailed
+  >;
+  readonly remove: (
+    id: string,
+  ) => Effect.Effect<void, BookingNotFound | ApiRequestFailed>;
 }
 
 // --- Tag ---
 
-export class BookingApi extends Context.Tag('BookingApi')<
+export class BookingApi extends Context.Tag("BookingApi")<
   BookingApi,
   BookingApiShape
 >() {}
@@ -176,43 +192,62 @@ export class BookingApi extends Context.Tag('BookingApi')<
 export const BookingApiLive = Layer.effect(
   BookingApi,
   Effect.gen(function* () {
-    const client = yield* ApiHttpClient
+    const client = yield* ApiHttpClient;
 
     // Helper: map HTTP/parse errors to domain errors based on status
     const mapHttpError = (method: string, path: string) => (error: unknown) => {
       if (
-        typeof error === 'object' && error !== null &&
-        '_tag' in error && error._tag === 'ResponseError' &&
-        'response' in error
+        typeof error === "object" &&
+        error !== null &&
+        "_tag" in error &&
+        error._tag === "ResponseError" &&
+        "response" in error
       ) {
-        const status = (error as { response: { status: number } }).response.status
-        if (status === 404) return new BookingNotFound({ bookingId: path })
-        return new ApiRequestFailed({ method, path, status, message: String(error) })
+        const status = (error as { response: { status: number } }).response
+          .status;
+        if (status === 404) return new BookingNotFound({ bookingId: path });
+        return new ApiRequestFailed({
+          method,
+          path,
+          status,
+          message: String(error),
+        });
       }
-      return new ApiRequestFailed({ method, path, status: 0, message: String(error) })
-    }
+      return new ApiRequestFailed({
+        method,
+        path,
+        status: 0,
+        message: String(error),
+      });
+    };
 
     return {
       // GET /bookings — decode response with schema
-      getAll: client.get('/bookings').pipe(
-        Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingListResponse)),
-        Effect.mapError(mapHttpError('GET', '/bookings')),
-      ),
+      getAll: client
+        .get("/bookings")
+        .pipe(
+          Effect.flatMap(
+            HttpClientResponse.schemaBodyJson(BookingListResponse),
+          ),
+          Effect.mapError(mapHttpError("GET", "/bookings")),
+        ),
 
       // GET /bookings/:id
       getById: (id) =>
-        client.get(`/bookings/${id}`).pipe(
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingResponse)),
-          Effect.mapError(mapHttpError('GET', `/bookings/${id}`)),
-        ),
+        client
+          .get(`/bookings/${id}`)
+          .pipe(
+            Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingResponse)),
+            Effect.mapError(mapHttpError("GET", `/bookings/${id}`)),
+          ),
 
       // POST /bookings — encode request body with schema
       create: (body) =>
-        HttpClientRequest.post('/bookings').pipe(
+        HttpClientRequest.post("/bookings").pipe(
           HttpClientRequest.schemaBodyJson(BookingRequest)(body),
           Effect.flatMap(client.execute),
           Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingResponse)),
-          Effect.mapError(mapHttpError('POST', '/bookings')),
+          Effect.mapError(mapHttpError("POST", "/bookings")),
         ),
 
       // PUT /bookings/:id — full replacement
@@ -221,7 +256,7 @@ export const BookingApiLive = Layer.effect(
           HttpClientRequest.schemaBodyJson(BookingUpdateRequest)(body),
           Effect.flatMap(client.execute),
           Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingResponse)),
-          Effect.mapError(mapHttpError('PUT', `/bookings/${id}`)),
+          Effect.mapError(mapHttpError("PUT", `/bookings/${id}`)),
         ),
 
       // PATCH /bookings/:id — partial update
@@ -230,18 +265,20 @@ export const BookingApiLive = Layer.effect(
           HttpClientRequest.schemaBodyJson(BookingPatchRequest)(body),
           Effect.flatMap(client.execute),
           Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingResponse)),
-          Effect.mapError(mapHttpError('PATCH', `/bookings/${id}`)),
+          Effect.mapError(mapHttpError("PATCH", `/bookings/${id}`)),
         ),
 
       // DELETE /bookings/:id — no response body
       remove: (id) =>
-        client.del(`/bookings/${id}`).pipe(
-          Effect.asVoid,
-          Effect.mapError(mapHttpError('DELETE', `/bookings/${id}`)),
-        ),
-    }
-  })
-)
+        client
+          .del(`/bookings/${id}`)
+          .pipe(
+            Effect.asVoid,
+            Effect.mapError(mapHttpError("DELETE", `/bookings/${id}`)),
+          ),
+    };
+  }),
+);
 ```
 
 ### Request Method Helpers
@@ -249,12 +286,12 @@ export const BookingApiLive = Layer.effect(
 `HttpClient` exposes convenience methods for common verbs:
 
 ```ts
-client.get('/path')                  // GET
-client.post('/path')                 // POST (no body — use HttpClientRequest.post for body)
-client.put('/path')                  // PUT
-client.patch('/path')                // PATCH
-client.del('/path')                  // DELETE
-client.execute(request)              // Execute a pre-built HttpClientRequest
+client.get("/path"); // GET
+client.post("/path"); // POST (no body — use HttpClientRequest.post for body)
+client.put("/path"); // PUT
+client.patch("/path"); // PATCH
+client.del("/path"); // DELETE
+client.execute(request); // Execute a pre-built HttpClientRequest
 ```
 
 ---
@@ -265,11 +302,12 @@ When a request needs a body, you build the request with `HttpClientRequest.*`, a
 
 ```ts
 // The pipe chain:
-HttpClientRequest.post('/bookings').pipe(       // 1. Create request
+HttpClientRequest.post("/bookings").pipe(
+  // 1. Create request
   HttpClientRequest.schemaBodyJson(MySchema)(body), // 2. Validate + encode body
-  Effect.flatMap(client.execute),                    // 3. Send request
+  Effect.flatMap(client.execute), // 3. Send request
   Effect.flatMap(HttpClientResponse.schemaBodyJson(ResponseSchema)), // 4. Decode response
-)
+);
 ```
 
 **Step by step:**
@@ -424,41 +462,41 @@ getReport: (bookingId, format) =>
 **`src/features/booking/contract/schemas.ts`**
 
 ```ts
-import { Schema } from 'effect'
+import { Schema } from "effect";
 
 // Branded ID type
-export const BookingId = Schema.String.pipe(Schema.brand('BookingId'))
-export type BookingId = Schema.Schema.Type<typeof BookingId>
+export const BookingId = Schema.String.pipe(Schema.brand("BookingId"));
+export type BookingId = Schema.Schema.Type<typeof BookingId>;
 
 // Single booking response
 export const BookingResponse = Schema.Struct({
   id: BookingId,
-  status: Schema.Literal('pending', 'confirmed', 'cancelled'),
-  pickupDate: Schema.DateFromString,   // parses ISO string → Date
+  status: Schema.Literal("pending", "confirmed", "cancelled"),
+  pickupDate: Schema.DateFromString, // parses ISO string → Date
   dropoffDate: Schema.DateFromString,
   driverId: Schema.NullOr(Schema.String),
   vehicleId: Schema.NullOr(Schema.String),
   origin: Schema.String,
   destination: Schema.String,
-})
+});
 
 // List response — array of bookings
-export const BookingListResponse = Schema.Array(BookingResponse)
+export const BookingListResponse = Schema.Array(BookingResponse);
 
 // POST request body
 export const BookingRequest = Schema.Struct({
-  status: Schema.Literal('pending', 'confirmed', 'cancelled'),
+  status: Schema.Literal("pending", "confirmed", "cancelled"),
   pickupDate: Schema.String,
   dropoffDate: Schema.String,
   origin: Schema.String,
   destination: Schema.String,
-})
+});
 
 // PUT request body — full replacement (same shape, no id)
-export const BookingUpdateRequest = BookingRequest
+export const BookingUpdateRequest = BookingRequest;
 
 // PATCH request body — partial
-export const BookingPatchRequest = Schema.partial(BookingRequest)
+export const BookingPatchRequest = Schema.partial(BookingRequest);
 ```
 
 ### Using schemaBodyJson in a Service
@@ -496,18 +534,18 @@ getById: (id) =>
 ```ts
 // Applied in ApiHttpClientLive (see section 1):
 HttpClient.retryTransient({
-  times: 3,                                  // max 3 retries
-  schedule: Schedule.exponential('200 millis'), // 200ms → 400ms → 800ms
-})
+  times: 3, // max 3 retries
+  schedule: Schedule.exponential("200 millis"), // 200ms → 400ms → 800ms
+});
 ```
 
 The `mode` option controls what gets retried:
 
-| Mode | Retries errors | Retries 429/5xx responses |
-|---|---|---|
-| `"both"` (default) | Yes | Yes |
-| `"errors-only"` | Yes | No |
-| `"response-only"` | No | Yes |
+| Mode               | Retries errors | Retries 429/5xx responses |
+| ------------------ | -------------- | ------------------------- |
+| `"both"` (default) | Yes            | Yes                       |
+| `"errors-only"`    | Yes            | No                        |
+| `"response-only"`  | No             | Yes                       |
 
 ### Per-Method Retry with `HttpClient.retry`
 
@@ -529,43 +567,44 @@ getById: (id) =>
 ### Domain Errors with Schema.TaggedError
 
 All domain errors extend `Schema.TaggedError` — never use plain `new Error(...)`. Tagged errors are:
+
 - **Type-safe** — TypeScript tracks them in the error channel
 - **Serializable** — Effect Schema can encode/decode them
 - **Pattern-matchable** — use `._tag` for exhaustive matching
 
 ```ts
 // src/features/booking/contract/errors.ts
-import { Schema } from 'effect'
+import { Schema } from "effect";
 
 export class BookingNotFound extends Schema.TaggedError<BookingNotFound>()(
-  'BookingNotFound',
-  { bookingId: Schema.String }
+  "BookingNotFound",
+  { bookingId: Schema.String },
 ) {}
 
 export class BookingConflict extends Schema.TaggedError<BookingConflict>()(
-  'BookingConflict',
+  "BookingConflict",
   {
     bookingId: Schema.String,
     message: Schema.String,
-  }
+  },
 ) {}
 
 export class BookingValidationError extends Schema.TaggedError<BookingValidationError>()(
-  'BookingValidationError',
+  "BookingValidationError",
   {
     field: Schema.String,
     message: Schema.String,
-  }
+  },
 ) {}
 
 export class ApiRequestFailed extends Schema.TaggedError<ApiRequestFailed>()(
-  'ApiRequestFailed',
+  "ApiRequestFailed",
   {
     method: Schema.String,
     path: Schema.String,
     status: Schema.Number,
     message: Schema.String,
-  }
+  },
 ) {}
 ```
 
@@ -611,21 +650,28 @@ Tagged errors flow through atoms and can be pattern-matched in React:
 
 ```tsx
 function BookingDetail() {
-  const result = useAtomValue(Booking.detail)
+  const result = useAtomValue(Booking.detail);
 
-  if (result._tag === 'Failure') {
-    const error = Cause.failureOption(result.cause)
+  if (result._tag === "Failure") {
+    const error = Cause.failureOption(result.cause);
     if (Option.isSome(error)) {
       switch (error.value._tag) {
-        case 'BookingNotFound':
-          return <NotFound message={`Booking ${error.value.bookingId} not found`} />
-        case 'BookingConflict':
-          return <Alert variant="warning">{error.value.message}</Alert>
-        case 'ApiRequestFailed':
-          return <ErrorDisplay status={error.value.status} message={error.value.message} />
+        case "BookingNotFound":
+          return (
+            <NotFound message={`Booking ${error.value.bookingId} not found`} />
+          );
+        case "BookingConflict":
+          return <Alert variant="warning">{error.value.message}</Alert>;
+        case "ApiRequestFailed":
+          return (
+            <ErrorDisplay
+              status={error.value.status}
+              message={error.value.message}
+            />
+          );
       }
     }
-    return <ErrorDisplay message="An unexpected error occurred" />
+    return <ErrorDisplay message="An unexpected error occurred" />;
   }
 
   // ... render success
@@ -659,24 +705,24 @@ BookingApiLive                        DriverApiLive
 **`src/lib/runtime.ts`**
 
 ```ts
-import { Layer } from 'effect'
-import { ApiHttpClientLive } from '~/lib/http-client'
-import { AuthServiceLive } from '~/services/auth.service'
-import { BookingApiLive } from '~/features/booking/api/booking.api'
-import { DriverApiLive } from '~/features/driver/api/driver.api'
+import { Layer } from "effect";
+import { ApiHttpClientLive } from "~/lib/http-client";
+import { AuthServiceLive } from "~/services/auth.service";
+import { BookingApiLive } from "~/features/booking/api/booking.api";
+import { DriverApiLive } from "~/features/driver/api/driver.api";
 
 // Merge all feature API layers
 const AppApiLayer = Layer.mergeAll(
   BookingApiLive,
   DriverApiLive,
   // add more feature API layers here
-)
+);
 
 // Full application layer — ApiHttpClientLive is shared across all feature services
 export const AppLayer = AppApiLayer.pipe(
   Layer.provide(ApiHttpClientLive),
   Layer.provide(AuthServiceLive),
-)
+);
 ```
 
 Each feature API layer (e.g., `BookingApiLive`) declares `ApiHttpClient` as a dependency. `Layer.provide(ApiHttpClientLive)` satisfies that dependency for all of them at once — there is a single shared `ApiHttpClient` instance.
@@ -700,11 +746,11 @@ All of this is fully typed through the Effect type system. TypeScript knows the 
 
 ## File Locations Reference
 
-| File | Purpose |
-|---|---|
-| `src/lib/http-client.ts` | `ApiHttpClient` tag + `ApiHttpClientLive` layer |
-| `src/lib/runtime.ts` | `AppLayer` composition |
-| `src/services/auth.service.ts` | `AuthService` — provides `getToken` |
-| `src/features/booking/api/booking.api.ts` | `BookingApi` tag + `BookingApiLive` layer |
+| File                                       | Purpose                                               |
+| ------------------------------------------ | ----------------------------------------------------- |
+| `src/lib/http-client.ts`                   | `ApiHttpClient` tag + `ApiHttpClientLive` layer       |
+| `src/lib/runtime.ts`                       | `AppLayer` composition                                |
+| `src/services/auth.service.ts`             | `AuthService` — provides `getToken`                   |
+| `src/features/booking/api/booking.api.ts`  | `BookingApi` tag + `BookingApiLive` layer             |
 | `src/features/booking/contract/schemas.ts` | Effect Schema definitions for request/response shapes |
-| `src/features/booking/contract/errors.ts` | Domain errors (`BookingNotFound`, etc.) |
+| `src/features/booking/contract/errors.ts`  | Domain errors (`BookingNotFound`, etc.)               |
