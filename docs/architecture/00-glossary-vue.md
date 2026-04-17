@@ -19,9 +19,6 @@ Read this page first if you're coming from Vue (Options API, Composition API, or
 | `Schema` | Zod/Valibot validation — defines shapes and validates data |
 | `Schema.TaggedError` | A custom error class with a discriminant — like a typed error you'd use with `createError()` in Nuxt |
 | `.pipe(fn1, fn2, fn3)` | Chaining `.value` transformations — like computed chains |
-| React component (`.tsx`) | Vue SFC (`.vue`) — takes props, returns template |
-| React `useState` | `ref()` — reactive primitive for local state |
-| React `useEffect` | `watch()` / `watchEffect()` — react to changes |
 | Atom (`Atom.make`) | `ref()` in a composable or Pinia `state` — shared reactive state |
 | Atom (`Atom.readable`) | `computed()` — derived reactive state |
 | Atom (`apiRuntime.atom`) | Pinia action that fetches data + stores it in state — but reactive and auto-updating |
@@ -31,49 +28,6 @@ Read this page first if you're coming from Vue (Options API, Composition API, or
 ---
 
 ## Reading the Syntax
-
-### Components — Vue vs React
-
-```vue
-<!-- Vue SFC -->
-<script setup lang="ts">
-import { ref, computed } from 'vue'
-
-const props = defineProps<{ bookingId: string }>()
-const isExpanded = ref(false)
-const label = computed(() => isExpanded.value ? 'Collapse' : 'Expand')
-</script>
-
-<template>
-  <div>
-    <button @click="isExpanded = !isExpanded">{{ label }}</button>
-    <BookingDetail v-if="isExpanded" :id="props.bookingId" />
-  </div>
-</template>
-```
-
-```tsx
-// React TSX
-import { useState } from 'react'
-
-function BookingRow({ bookingId }: { bookingId: string }) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  const label = isExpanded ? 'Collapse' : 'Expand'
-
-  return (
-    <div>
-      <button onClick={() => setIsExpanded(!isExpanded)}>{label}</button>
-      {isExpanded && <BookingDetail id={bookingId} />}
-    </div>
-  )
-}
-```
-
-**Key differences:**
-- React uses `useState` instead of `ref()` — same concept, different API
-- No template syntax — JSX is JavaScript with HTML-like syntax inline
-- `{condition && <Component />}` instead of `v-if`
-- `onClick` instead of `@click`, `className` instead of `class`
 
 ### State Management — Pinia vs Atoms
 
@@ -237,11 +191,6 @@ export const Route = createFileRoute('/_authenticated')({
 
 | Vue concept | TMS equivalent | File location |
 |---|---|---|
-| SFC (`.vue`) | React component (`.tsx`) | `src/features/*/components/` |
-| `<script setup>` | Component function body | Inside the `.tsx` component |
-| `ref()` | `useState()` (local) or `Atom.make()` (shared) | Component or `*.atoms.ts` |
-| `computed()` | `Atom.readable()` | `src/features/*/booking.atoms.ts` |
-| `watch()` / `watchEffect()` | `useEffect()` or atom subscriptions | Hooks or atoms |
 | Pinia store | Atoms namespace (`export const Booking = { list, create }`) | `src/features/*/booking.atoms.ts` |
 | Pinia action | `apiRuntime.fn(...)` mutation atom | `src/features/*/booking.atoms.ts` |
 | Composable (`use*.ts`) | React hook (`use*.ts`) | `src/features/*/booking.hooks.ts` |
@@ -249,9 +198,6 @@ export const Route = createFileRoute('/_authenticated')({
 | `app.provide()` | `Layer.provide()` in `runtime.ts` | `src/lib/runtime.ts` |
 | Vue Router route config | File-based route (`.tsx` file) | `src/routes/` |
 | Navigation guard | `beforeLoad` on route | `src/routes/_authenticated.tsx` |
-| `v-if` / `v-for` / `v-model` | `{cond && ...}` / `.map()` / `value + onChange` | JSX in components |
-| Slot (`<slot>`) | `children` prop or render props | Component props |
-| `defineEmits` | Callback props (`onSubmit`, `onChange`) | Component props |
 
 ---
 

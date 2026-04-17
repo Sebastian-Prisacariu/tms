@@ -19,8 +19,6 @@ Read this page first if you're coming from a PHP background (Laravel, Symfony, o
 | `Schema` | Form Request validation (Laravel) or Symfony's Validator constraints — defines shapes and validates data |
 | `Schema.TaggedError` | A custom exception class like `BookingNotFoundException extends Exception` — but the type system tracks which methods can throw it |
 | `.pipe(fn1, fn2, fn3)` | Method chaining like `$query->where(...)->orderBy(...)->get()` — transformations flow left to right |
-| React component | A Blade/Twig template — takes data (props), returns HTML |
-| React `useState` | A form field's current value in the browser — ephemeral UI state |
 | Atom | A repository or cache that components can subscribe to — like a reactive `Cache::get()` that auto-updates the UI |
 
 ---
@@ -167,7 +165,6 @@ type CreateBookingInput = Schema.Schema.Type<typeof CreateBookingInput>
 | Custom Exception | `Schema.TaggedError` | `src/features/*/contract/errors.ts` |
 | Service Provider | Layer composition in `runtime.ts` | `src/lib/runtime.ts` |
 | Form Request | Effect Schema (same as model) | `src/features/*/contract/schemas.ts` |
-| Blade/Twig template | React component (`.tsx`) | `src/features/*/components/` |
 | Middleware | TanStack Router `beforeLoad` guard | `src/routes/_authenticated.tsx` |
 | `config/app.php` | `Config.string('VITE_API_URL')` | Read via Effect's `Config` module |
 | Cache/Session | Atoms (`Atom.make`, `Atom.kvs`) | `src/features/*/booking.atoms.ts` |
