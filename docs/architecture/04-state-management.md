@@ -1,6 +1,7 @@
 # 04 — State Management
 
 > All state through `@effect-atom/atom`. No `useState`/`useEffect` for domain data.
+> New to Effect? Start with [00-effect-glossary.md](./00-effect-glossary.md) for a quick mental-model mapping.
 
 ## Overview
 
@@ -10,22 +11,26 @@ We use [`@effect-atom/atom`](https://github.com/tim-smart/effect-atom) (v0.5.x) 
 
 ## Table of Contents
 
+### Essentials
 - [Registry Provider Setup](#registry-provider-setup)
 - [Simple Atoms](#simple-atoms)
 - [Derived Atoms (Readable)](#derived-atoms-readable)
-- [Writable Atoms](#writable-atoms)
 - [Runtime Atoms (Service-Backed)](#runtime-atoms-service-backed)
 - [Mutations with runtimeAtom.fn](#mutations-with-runtimeatomfn)
+- [Result Handling](#result-handling)
+- [React Hooks](#react-hooks)
+- [Namespace Export Convention](#namespace-export-convention)
+- [When to Use React State vs Atoms](#when-to-use-react-state-vs-atoms)
+
+### Advanced Patterns
+- [Writable Atoms](#writable-atoms)
 - [Registry Access in Mutations](#registry-access-in-mutations)
 - [Cross-Atom Dependency API](#cross-atom-dependency-api)
 - [Self-Initializing Pattern](#self-initializing-pattern)
 - [Reactive Sync Atoms](#reactive-sync-atoms)
 - [Persistent Atoms (Atom.kvs)](#persistent-atoms-atomkvs)
-- [Result Handling](#result-handling)
 - [ScopedAtom](#scopedatom)
 - [Atom.family](#atomfamily)
-- [React Hooks](#react-hooks)
-- [Namespace Export Convention](#namespace-export-convention)
 
 ---
 
@@ -117,34 +122,6 @@ const progress = Atom.readable((get) => {
   if (steps.length <= 1) return 100
   return Math.round((index / (steps.length - 1)) * 100)
 })
-```
-
----
-
-## Writable Atoms
-
-Custom read + write logic. The reader function receives `get`, the writer receives `(ctx, value)`.
-
-```ts
-import { Atom } from '@effect-atom/atom'
-
-// Atom with custom write logic
-const filters = Atom.writable<BookingFilters, Partial<BookingFilters>>(
-  // Reader: return current value
-  (get) => {
-    const self = get.self<BookingFilters>()
-    if (Option.isSome(self)) return self.value
-    return defaultFilters
-  },
-  // Writer: merge partial updates into current value
-  (ctx, partial) => {
-    const current = ctx.self<BookingFilters>()
-    ctx.setSelf({
-      ...(Option.isSome(current) ? current.value : defaultFilters),
-      ...partial,
-    })
-  }
-)
 ```
 
 ---
@@ -243,6 +220,183 @@ function CreateBookingButton() {
 
   return <Button onClick={handleCreate}>Create Booking</Button>
 }
+```
+
+---
+
+## Result Handling
+
+Effectful atoms (created via `Atom.make(Effect.gen(...))` or `runtimeAtom.atom(...)`) return `Result<A, E>` with three states:
+
+```ts
+import { Result } from '@effect-atom/atom'
+
+// Result states:
+// - Initial    (._tag === 'Initial')  — atom hasn't run yet
+// - Success    (._tag === 'Success')  — has .value
+// - Failure    (._tag === 'Failure')  — has .cause
+
+// All states have:
+// - .waiting: boolean — true while a re-fetch is in flight
+
+// Reading values
+const value = Result.value(result)        // Option<A> — Some if Success
+const isLoading = result.waiting          // boolean
+
+// In components — pattern matching
+function BookingList() {
+  const result = useAtomValue(Booking.list)
+
+  if (result._tag === 'Initial' || result.waiting) return <Spinner />
+  if (result._tag === 'Failure') return <ErrorDisplay cause={result.cause} />
+  return <List items={result.value} />
+}
+
+// Or using the builder pattern
+function BookingList() {
+  const result = useAtomValue(Booking.list)
+
+  return Result.builder(result)
+    .onInitial(() => <Spinner />)
+    .onFailure((cause) => <ErrorDisplay cause={cause} />)
+    .onSuccess((bookings, { waiting }) => (
+      <div>
+        {waiting && <RefreshIndicator />}
+        <List items={bookings} />
+      </div>
+    ))
+    .render()
+}
+```
+
+---
+
+## React Hooks
+
+All hooks from `@effect-atom/atom-react`:
+
+```tsx
+import {
+  useAtomValue,    // Read atom value (subscribes to updates)
+  useAtomSet,      // Get setter function
+  useAtom,         // Read + write: [value, setter]
+  useAtomSuspense, // Throws Promise while loading (React Suspense)
+  useAtomRefresh,  // Returns () => void to force re-fetch
+  useAtomMount,    // Mount atom without reading (keeps alive)
+  useAtomSubscribe // Subscribe to changes imperatively
+} from '@effect-atom/atom-react'
+
+// useAtomValue — read-only subscription
+const bookings = useAtomValue(Booking.list)
+const step = useAtomValue(WizardFlow.currentStep)
+
+// useAtomValue with inline selector
+const count = useAtomValue(Booking.list, (result) =>
+  Result.value(result).pipe(Option.map(arr => arr.length), Option.getOrElse(() => 0))
+)
+
+// useAtomSet — write-only (also mounts the atom)
+const setStep = useAtomSet(WizardFlow.currentStep)
+const createBooking = useAtomSet(Booking.create)
+
+// useAtom — read + write together
+const [filters, setFilters] = useAtom(Booking.filters)
+const [generateResult, setGenerate] = useAtom(RouteState.generate)
+
+// useAtomRefresh — manual re-fetch
+const refresh = useAtomRefresh(Booking.list)
+// Later: refresh()
+
+// useAtomSuspense — for React Suspense boundaries
+function BookingListSuspense() {
+  const result = useAtomSuspense(Booking.list)
+  // result is guaranteed to be Success here
+  return <List items={result.value} />
+}
+```
+
+---
+
+## Namespace Export Convention
+
+All atoms for a feature are exported as a single namespace object. This keeps imports clean and makes the feature's state API discoverable.
+
+```ts
+// features/booking/state/booking.atoms.ts
+
+const list = apiRuntime.atom(/* ... */)
+const filters = Atom.writable<BookingFilters, Partial<BookingFilters>>(/* ... */)
+const create = apiRuntime.fn(/* ... */)
+const update = apiRuntime.fn(/* ... */)
+const remove = apiRuntime.fn(/* ... */)
+
+export const Booking = {
+  list,
+  filters,
+  create,
+  update,
+  remove,
+}
+```
+
+**Usage in hooks/components:**
+
+```ts
+import { Booking } from '../state/booking.atoms'
+
+const result = useAtomValue(Booking.list)
+const createBooking = useAtomSet(Booking.create)
+const [filters, setFilters] = useAtom(Booking.filters)
+```
+
+---
+
+## When to Use React State vs Atoms
+
+| Concern | Use | Example |
+|---|---|---|
+| Server/domain data | Atoms (`apiRuntime.atom`) | Booking list, driver details |
+| Derived computations | Atoms (`Atom.readable`) | Filtered bookings, step progress |
+| Cross-component shared state | Atoms (`Atom.make`) | Current step, selected ID |
+| Persistent user preferences | Atoms (`Atom.kvs`) | Sidebar state, view mode |
+| Ephemeral UI state | React `useState` | Modal open/closed, input focus, hover |
+| Form field being typed | React `useState` | Input value before submit |
+| Animation/transition state | React `useState` | Accordion expanded |
+
+**Why atoms over useState?** Atoms are framework-agnostic, testable without React, compose with Effect services, and support derived state without `useEffect` → `setState` chains.
+
+---
+
+# Advanced Patterns
+
+> The patterns below are used in specific scenarios. Start with the essentials above — you can come back here when you need them.
+
+---
+
+## Writable Atoms
+
+Custom read + write logic. The reader function receives `get`, the writer receives `(ctx, value)`.
+
+```ts
+import { Atom } from '@effect-atom/atom'
+
+// Atom with custom write logic
+const filters = Atom.writable<BookingFilters, Partial<BookingFilters>>(
+  // Reader: return current value
+  (get) => {
+    const self = get.self<BookingFilters>()
+    if (Option.isSome(self)) return self.value
+    return defaultFilters
+  },
+  // Writer: merge partial updates into current value
+  (ctx, partial) => {
+    const current = ctx.self<BookingFilters>()
+    ctx.setSelf({
+      ...(Option.isSome(current) ? current.value : defaultFilters),
+      ...partial,
+    })
+  }
+)
 ```
 
 ---
@@ -468,53 +622,6 @@ const localDraft = Atom.kvs({
 
 ---
 
-## Result Handling
-
-Effectful atoms (created via `Atom.make(Effect.gen(...))` or `runtimeAtom.atom(...)`) return `Result<A, E>` with three states:
-
-```ts
-import { Result } from '@effect-atom/atom'
-
-// Result states:
-// - Initial    (._tag === 'Initial')  — atom hasn't run yet
-// - Success    (._tag === 'Success')  — has .value
-// - Failure    (._tag === 'Failure')  — has .cause
-
-// All states have:
-// - .waiting: boolean — true while a re-fetch is in flight
-
-// Reading values
-const value = Result.value(result)        // Option<A> — Some if Success
-const isLoading = result.waiting          // boolean
-
-// In components — pattern matching
-function BookingList() {
-  const result = useAtomValue(Booking.list)
-
-  if (result._tag === 'Initial' || result.waiting) return <Spinner />
-  if (result._tag === 'Failure') return <ErrorDisplay cause={result.cause} />
-  return <List items={result.value} />
-}
-
-// Or using the builder pattern
-function BookingList() {
-  const result = useAtomValue(Booking.list)
-
-  return Result.builder(result)
-    .onInitial(() => <Spinner />)
-    .onFailure((cause) => <ErrorDisplay cause={cause} />)
-    .onSuccess((bookings, { waiting }) => (
-      <div>
-        {waiting && <RefreshIndicator />}
-        <List items={bookings} />
-      </div>
-    ))
-    .render()
-}
-```
-
----
-
 ## ScopedAtom
 
 `ScopedAtom.make` creates atoms that are **scoped to a React subtree**. Each `Provider` gets its own atom instance. Use this for feature-level state that shouldn't be global.
@@ -606,99 +713,3 @@ function BookingRow({ id }: { id: string }) {
   )
 }
 ```
-
----
-
-## React Hooks
-
-All hooks from `@effect-atom/atom-react`:
-
-```tsx
-import {
-  useAtomValue,    // Read atom value (subscribes to updates)
-  useAtomSet,      // Get setter function
-  useAtom,         // Read + write: [value, setter]
-  useAtomSuspense, // Throws Promise while loading (React Suspense)
-  useAtomRefresh,  // Returns () => void to force re-fetch
-  useAtomMount,    // Mount atom without reading (keeps alive)
-  useAtomSubscribe // Subscribe to changes imperatively
-} from '@effect-atom/atom-react'
-
-// useAtomValue — read-only subscription
-const bookings = useAtomValue(Booking.list)
-const step = useAtomValue(WizardFlow.currentStep)
-
-// useAtomValue with inline selector
-const count = useAtomValue(Booking.list, (result) =>
-  Result.value(result).pipe(Option.map(arr => arr.length), Option.getOrElse(() => 0))
-)
-
-// useAtomSet — write-only (also mounts the atom)
-const setStep = useAtomSet(WizardFlow.currentStep)
-const createBooking = useAtomSet(Booking.create)
-
-// useAtom — read + write together
-const [filters, setFilters] = useAtom(Booking.filters)
-const [generateResult, setGenerate] = useAtom(RouteState.generate)
-
-// useAtomRefresh — manual re-fetch
-const refresh = useAtomRefresh(Booking.list)
-// Later: refresh()
-
-// useAtomSuspense — for React Suspense boundaries
-function BookingListSuspense() {
-  const result = useAtomSuspense(Booking.list)
-  // result is guaranteed to be Success here
-  return <List items={result.value} />
-}
-```
-
----
-
-## Namespace Export Convention
-
-All atoms for a feature are exported as a single namespace object. This keeps imports clean and makes the feature's state API discoverable.
-
-```ts
-// features/booking/state/booking.atoms.ts
-
-const list = apiRuntime.atom(/* ... */)
-const filters = Atom.writable<BookingFilters, Partial<BookingFilters>>(/* ... */)
-const create = apiRuntime.fn(/* ... */)
-const update = apiRuntime.fn(/* ... */)
-const remove = apiRuntime.fn(/* ... */)
-
-export const Booking = {
-  list,
-  filters,
-  create,
-  update,
-  remove,
-}
-```
-
-**Usage in hooks/components:**
-
-```ts
-import { Booking } from '../state/booking.atoms'
-
-const result = useAtomValue(Booking.list)
-const createBooking = useAtomSet(Booking.create)
-const [filters, setFilters] = useAtom(Booking.filters)
-```
-
----
-
-## When to Use React State vs Atoms
-
-| Concern | Use | Example |
-|---|---|---|
-| Server/domain data | Atoms (`apiRuntime.atom`) | Booking list, driver details |
-| Derived computations | Atoms (`Atom.readable`) | Filtered bookings, step progress |
-| Cross-component shared state | Atoms (`Atom.make`) | Current step, selected ID |
-| Persistent user preferences | Atoms (`Atom.kvs`) | Sidebar state, view mode |
-| Ephemeral UI state | React `useState` | Modal open/closed, input focus, hover |
-| Form field being typed | React `useState` | Input value before submit |
-| Animation/transition state | React `useState` | Accordion expanded |
-
-**Why atoms over useState?** Atoms are framework-agnostic, testable without React, compose with Effect services, and support derived state without `useEffect` → `setState` chains.

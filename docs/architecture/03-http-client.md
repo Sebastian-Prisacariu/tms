@@ -1,6 +1,7 @@
 # 03 — HTTP Client
 
 > `@effect/platform` HttpClient configured as an injectable Effect service — base URL, auth headers, schema validation, and feature API services.
+> New to Effect? Start with [00-effect-glossary.md](./00-effect-glossary.md) for a quick mental-model mapping.
 
 ## Overview
 
@@ -109,137 +110,34 @@ export const ApiHttpClientLive = Layer.effect(
 ).pipe(Layer.provide(BrowserHttpClient.layer))
 ```
 
-The key difference:
-
-|                      | `mapRequest`                                | `mapRequestEffect`                         |
-| -------------------- | ------------------------------------------- | ------------------------------------------ |
-| Callback return type | `HttpClientRequest`                         | `Effect<HttpClientRequest>`                |
-| Can yield Effects    | No                                          | Yes                                        |
-| Use for              | Static transforms (base URL, fixed headers) | Dynamic transforms (token lookup, signing) |
-
 ---
 
 ## 3. Feature API Service Pattern
 
 Each feature owns its API service in `src/features/{name}/api/{name}.api.ts`. The service is a `Context.Tag` whose implementation yields `ApiHttpClient` and exposes typed methods.
 
-### Complete BookingApi Example
+### Feature API Service Example
 
-**`src/features/booking/api/booking.api.ts`**
+Each feature's API service is a `Context.Tag` + `Layer.effect` (see [02-effect-services.md](./02-effect-services.md) for the full pattern). Here's a condensed example showing the HTTP-specific parts:
+
+**`src/features/booking/api/booking.api.ts`** (simplified — see [05-feature-anatomy.md](./05-feature-anatomy.md) for the complete version)
 
 ```ts
-import {
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-} from "@effect/platform";
-import { Context, Effect, Layer } from "effect";
-import { Schema } from "effect";
-import { ApiHttpClient } from "~/lib/http-client";
-import {
-  BookingRequest,
-  BookingResponse,
-  BookingListResponse,
-  BookingUpdateRequest,
-  BookingPatchRequest,
-} from "../contract/schemas";
-import {
-  BookingNotFound,
-  BookingValidationError,
-  ApiRequestFailed,
-} from "../contract/errors";
-
-// --- Service interface ---
-
-interface BookingApiShape {
-  readonly getAll: Effect.Effect<
-    Schema.Schema.Type<typeof BookingListResponse>,
-    ApiRequestFailed
-  >;
-  readonly getById: (
-    id: string,
-  ) => Effect.Effect<
-    Schema.Schema.Type<typeof BookingResponse>,
-    BookingNotFound | ApiRequestFailed
-  >;
-  readonly create: (
-    body: Schema.Schema.Type<typeof BookingRequest>,
-  ) => Effect.Effect<
-    Schema.Schema.Type<typeof BookingResponse>,
-    BookingValidationError | ApiRequestFailed
-  >;
-  readonly update: (
-    id: string,
-    body: Schema.Schema.Type<typeof BookingUpdateRequest>,
-  ) => Effect.Effect<
-    Schema.Schema.Type<typeof BookingResponse>,
-    BookingNotFound | ApiRequestFailed
-  >;
-  readonly patch: (
-    id: string,
-    body: Schema.Schema.Type<typeof BookingPatchRequest>,
-  ) => Effect.Effect<
-    Schema.Schema.Type<typeof BookingResponse>,
-    BookingNotFound | ApiRequestFailed
-  >;
-  readonly remove: (
-    id: string,
-  ) => Effect.Effect<void, BookingNotFound | ApiRequestFailed>;
-}
-
-// --- Tag ---
-
-export class BookingApi extends Context.Tag("BookingApi")<
-  BookingApi,
-  BookingApiShape
->() {}
-
-// --- Live implementation ---
-
 export const BookingApiLive = Layer.effect(
   BookingApi,
   Effect.gen(function* () {
-    const client = yield* ApiHttpClient;
-
-    // Schema for matching ResponseError shape from @effect/platform
-    const ResponseError = Schema.Struct({
-      _tag: Schema.Literal('ResponseError'),
-      response: Schema.Struct({ status: Schema.Number }),
-      message: Schema.String,
-    })
-    const isResponseError = Schema.is(ResponseError)
-
-    // Helper: map HTTP/parse errors to domain errors based on status
-    const mapHttpError = (method: string, path: string) => (error: unknown) => {
-      if (isResponseError(error)) {
-        if (error.response.status === 404) {
-          return new BookingNotFound({ bookingId: path })
-        }
-        return new ApiRequestFailed({
-          method, path,
-          status: error.response.status,
-          message: error.message,
-        })
-      }
-      return new ApiRequestFailed({
-        method, path,
-        status: 0,
-        message: String(error),
-      })
-    }
+    const client = yield* ApiHttpClient
 
     return {
-      // GET /bookings — decode response with schema
+      // GET — use client.get(), decode response with schemaBodyJson
       getAll: client
         .get("/bookings")
         .pipe(
-          Effect.flatMap(
-            HttpClientResponse.schemaBodyJson(BookingListResponse),
-          ),
+          Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingListResponse)),
           Effect.mapError(mapHttpError("GET", "/bookings")),
         ),
 
-      // GET /bookings/:id
+      // GET with path param
       getById: (id) =>
         client
           .get(`/bookings/${id}`)
@@ -248,7 +146,7 @@ export const BookingApiLive = Layer.effect(
             Effect.mapError(mapHttpError("GET", `/bookings/${id}`)),
           ),
 
-      // POST /bookings — encode request body with schema
+      // POST — build request, encode body with schemaBodyJson, then execute
       create: (body) =>
         HttpClientRequest.post("/bookings").pipe(
           HttpClientRequest.schemaBodyJson(BookingRequest)(body),
@@ -257,25 +155,7 @@ export const BookingApiLive = Layer.effect(
           Effect.mapError(mapHttpError("POST", "/bookings")),
         ),
 
-      // PUT /bookings/:id — full replacement
-      update: (id, body) =>
-        HttpClientRequest.put(`/bookings/${id}`).pipe(
-          HttpClientRequest.schemaBodyJson(BookingUpdateRequest)(body),
-          Effect.flatMap(client.execute),
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingResponse)),
-          Effect.mapError(mapHttpError("PUT", `/bookings/${id}`)),
-        ),
-
-      // PATCH /bookings/:id — partial update
-      patch: (id, body) =>
-        HttpClientRequest.patch(`/bookings/${id}`).pipe(
-          HttpClientRequest.schemaBodyJson(BookingPatchRequest)(body),
-          Effect.flatMap(client.execute),
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(BookingResponse)),
-          Effect.mapError(mapHttpError("PATCH", `/bookings/${id}`)),
-        ),
-
-      // DELETE /bookings/:id — no response body
+      // DELETE — no response body
       remove: (id) =>
         client
           .del(`/bookings/${id}`)
@@ -283,10 +163,12 @@ export const BookingApiLive = Layer.effect(
             Effect.asVoid,
             Effect.mapError(mapHttpError("DELETE", `/bookings/${id}`)),
           ),
-    };
+    }
   }),
-);
+)
 ```
+
+The `mapHttpError` helper converts platform `ResponseError` to domain-specific tagged errors — see [05-feature-anatomy.md](./05-feature-anatomy.md) for the full implementation.
 
 ### Request Method Helpers
 
@@ -534,14 +416,6 @@ HttpClient.retryTransient({
 });
 ```
 
-The `mode` option controls what gets retried:
-
-| Mode               | Retries errors | Retries 429/5xx responses |
-| ------------------ | -------------- | ------------------------- |
-| `"both"` (default) | Yes            | Yes                       |
-| `"errors-only"`    | Yes            | No                        |
-| `"response-only"`  | No             | Yes                       |
-
 ### Per-Method Retry with `HttpClient.retry`
 
 For retry logic that applies to a specific request (not all requests), use `HttpClient.retry` or `Effect.retry` directly:
@@ -559,49 +433,9 @@ getById: (id) =>
   ),
 ```
 
-### Domain Errors with Schema.TaggedError
+### Domain Errors
 
-All domain errors extend `Schema.TaggedError` — never use plain `new Error(...)`. Tagged errors are:
-
-- **Type-safe** — TypeScript tracks them in the error channel
-- **Serializable** — Effect Schema can encode/decode them
-- **Pattern-matchable** — use `._tag` for exhaustive matching
-
-```ts
-// src/features/booking/contract/errors.ts
-import { Schema } from "effect";
-
-export class BookingNotFound extends Schema.TaggedError<BookingNotFound>()(
-  "BookingNotFound",
-  { bookingId: Schema.String },
-) {}
-
-export class BookingConflict extends Schema.TaggedError<BookingConflict>()(
-  "BookingConflict",
-  {
-    bookingId: Schema.String,
-    message: Schema.String,
-  },
-) {}
-
-export class BookingValidationError extends Schema.TaggedError<BookingValidationError>()(
-  "BookingValidationError",
-  {
-    field: Schema.String,
-    message: Schema.String,
-  },
-) {}
-
-export class ApiRequestFailed extends Schema.TaggedError<ApiRequestFailed>()(
-  "ApiRequestFailed",
-  {
-    method: Schema.String,
-    path: Schema.String,
-    status: Schema.Number,
-    message: Schema.String,
-  },
-) {}
-```
+All domain errors use `Schema.TaggedError` — see [02-effect-services.md](./02-effect-services.md#5-tagged-errors) for how to define them. Feature services map HTTP errors to these domain errors using `Effect.mapError`.
 
 ### Mapping HTTP Errors to Domain Errors
 
@@ -649,86 +483,17 @@ getById: (id) =>
 
 ### Error Handling in Components
 
-Tagged errors flow through atoms and can be pattern-matched in React:
-
-```tsx
-function BookingDetail() {
-  const result = useAtomValue(Booking.detail);
-
-  if (result._tag === "Failure") {
-    const error = Cause.failureOption(result.cause);
-    if (Option.isSome(error)) {
-      switch (error.value._tag) {
-        case "BookingNotFound":
-          return (
-            <NotFound message={`Booking ${error.value.bookingId} not found`} />
-          );
-        case "BookingConflict":
-          return <Alert variant="warning">{error.value.message}</Alert>;
-        case "ApiRequestFailed":
-          return (
-            <ErrorDisplay
-              status={error.value.status}
-              message={error.value.message}
-            />
-          );
-      }
-    }
-    return <ErrorDisplay message="An unexpected error occurred" />;
-  }
-
-  // ... render success
-}
-```
+Tagged errors flow through atoms as `Result<A, E>`. See [04-state-management.md](./04-state-management.md#result-handling) for how to pattern-match on results in React components.
 
 ---
 
-## 6. Full Layer Graph
+## 6. Layer Graph
 
-The dependency graph flows from platform primitives up through shared infrastructure to feature services, and finally into `AppApiLayer` which is provided to `Atom.runtime`.
+The full dependency graph and `runtime.ts` wiring are documented in [02-effect-services.md](./02-effect-services.md#4-composing-layers). The HTTP client adds one detail: `AuthServiceLive` sits between `BrowserHttpClient.layer` and `ApiHttpClientLive` to provide dynamic auth tokens.
 
 ```
-BrowserHttpClient.layer          (platform fetch impl — no dependencies)
-       │
-       ▼
-AuthServiceLive                  (token management — reads BrowserHttpClient for token refresh)
-       │
-       ▼
-ApiHttpClientLive                (base URL + auth header + filterStatusOk)
-       │
-       ├──────────────────────────────────────┐
-       ▼                                      ▼
-BookingApiLive                        DriverApiLive
-       │                                      │
-       └──────────────┬───────────────────────┘
-                      ▼
-               AppApiLayer               (Layer.mergeAll — provided to Atom.runtime)
+BrowserHttpClient.layer → AuthServiceLive → ApiHttpClientLive → Feature API layers → AppApiLayer
 ```
-
-**`src/lib/runtime.ts`**
-
-```ts
-import { Layer } from "effect";
-import { ApiHttpClientLive } from "~/lib/http-client";
-import { AuthServiceLive } from "~/features/auth";
-import { BookingApiLive } from "~/features/booking/api/booking.api";
-import { DriverApiLive } from "~/features/driver/api/driver.api";
-
-// Merge all feature API layers
-const AppApiLayer = Layer.mergeAll(
-  BookingApiLive,
-  DriverApiLive,
-  // add more feature API layers here
-);
-
-// Full application layer — ApiHttpClientLive is shared across all feature services
-export const AppLayer = AppApiLayer.pipe(
-  Layer.provide(ApiHttpClientLive),
-  Layer.provide(AuthServiceLive),
-);
-```
-
-Each feature API layer (e.g., `BookingApiLive`) declares `ApiHttpClient` as a dependency. `Layer.provide(ApiHttpClientLive)` satisfies that dependency for all of them at once — there is a single shared `ApiHttpClient` instance.
 
 ---
 
@@ -746,6 +511,26 @@ Each feature API layer (e.g., `BookingApiLive`) declares `ApiHttpClient` as a de
 All of this is fully typed through the Effect type system. TypeScript knows the success type, the error type, and the required services at every step.
 
 ---
+
+## Advanced
+
+### `mapRequest` vs `mapRequestEffect`
+
+|                      | `mapRequest`                                | `mapRequestEffect`                         |
+| -------------------- | ------------------------------------------- | ------------------------------------------ |
+| Callback return type | `HttpClientRequest`                         | `Effect<HttpClientRequest>`                |
+| Can yield Effects    | No                                          | Yes                                        |
+| Use for              | Static transforms (base URL, fixed headers) | Dynamic transforms (token lookup, signing) |
+
+### Retry Modes
+
+The `mode` option on `retryTransient` controls what gets retried:
+
+| Mode               | Retries errors | Retries 429/5xx responses |
+| ------------------ | -------------- | ------------------------- |
+| `"both"` (default) | Yes            | Yes                       |
+| `"errors-only"`    | Yes            | No                        |
+| `"response-only"`  | No             | Yes                       |
 
 ## File Locations Reference
 

@@ -2,6 +2,8 @@
 
 > How services are defined, implemented, and composed using Effect's dependency injection system.
 
+> New to Effect? Start with [00-effect-glossary.md](./00-effect-glossary.md) for a quick mental-model mapping from React/Promise patterns.
+
 ## Overview
 
 All data-fetching, side-effectful, and shared infrastructure logic lives in **Effect services**. A service is an interface defined via `Context.Tag` and implemented via a `Layer`. This separates _what a service does_ (the tag/interface) from _how it does it_ (the live layer), enabling testing, mocking, and composition without any framework coupling.
@@ -32,12 +34,7 @@ class BookingApi extends Context.Tag('BookingApi')<
 export { BookingApi }
 ```
 
-The two type parameters are:
-
-| Parameter | Meaning |
-|---|---|
-| `BookingApi` (first) | The identifier — the class itself acts as the unique key |
-| Object literal (second) | The service shape — what callers can do with the service |
+See [00-effect-glossary.md](./00-effect-glossary.md) for a breakdown of the `Context.Tag` syntax.
 
 **Never export the Live implementation as the default.** Only the tag is public; the layer is wired up at the composition root.
 
