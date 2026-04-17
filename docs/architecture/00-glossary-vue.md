@@ -187,6 +187,133 @@ export const Route = createFileRoute('/_authenticated')({
 
 ---
 
+## The Effect Type Up Close
+
+`Effect.Effect<A, E, R>` has three type parameters:
+
+| Position | Meaning | Vue analogy |
+|---|---|---|
+| `A` | Value on **success** | What a composable returns (`Booking`, `Route[]`, `void`) |
+| `E` | Value on **typed failure** | The error shape a composable can produce — tracked by the compiler |
+| `R` | **Requirements** — services that must be provided | `inject()` keys needed to run — checked at compile time |
+
+```ts
+Effect.Effect<Booking, BookingNotFound, BookingApi>
+// "Returns a Booking, or fails with BookingNotFound, and needs BookingApi in context"
+```
+
+Imagine if a Vue composable's signature encoded "this calls `inject(BookingApiKey)` and returns `Booking | BookingNotFound`" — and the compiler enforced that you provided the injection key at the top and handled the error at the call site. That's the Effect type.
+
+You'll often see `Effect.Effect<A, E>` (two params) — that's shorthand for `R = never`, meaning "no requirements left, ready to run."
+
+---
+
+## Other Core Types You'll See
+
+### `Option<A>` — a value that may not be there
+
+`Option<A>` replaces `T | null` / `T | undefined`. Either `Some(value)` or `None`, and the compiler forces you to handle both.
+
+```ts
+import { Option } from 'effect'
+
+const maybe: Option.Option<Booking> = Option.some(booking)
+const empty: Option.Option<Booking> = Option.none()
+
+Option.match(maybe, {
+  onSome: (b) => `Got ${b.id}`,
+  onNone: () => 'No booking',
+})
+
+Option.getOrElse(maybe, () => defaultBooking)
+```
+
+**Vue analogy:** like a `Ref<T | null>` where the compiler refuses to let you touch `.value.foo` before you null-check. Replaces the `v-if="data"` + `if (!data.value) return` patterns with a value you can transform in place.
+
+### `Either<E, A>` — synchronous success-or-failure
+
+`Either<E, A>` is Effect's synchronous cousin: `Right<A>` (success) or `Left<E>` (failure). No async, no services — just a value-returning alternative to exceptions for pure code.
+
+```ts
+import { Either } from 'effect'
+
+const ok: Either.Either<number, string> = Either.right(42)
+const bad: Either.Either<number, string> = Either.left('oops')
+
+Either.match(bad, {
+  onLeft: (e) => `Failed: ${e}`,
+  onRight: (n) => `Got: ${n}`,
+})
+```
+
+**Vue analogy:** like returning a discriminated union `{ ok: true, data: T } | { ok: false, error: E }` from a function, which you then narrow with an `if (result.ok)` check — except `Either` comes with `match`, `map`, and composition helpers built in.
+
+**When to use which:**
+- `Option<A>` — "is there a value?" (lookups, find methods, maybe-present data)
+- `Either<E, A>` — "did this synchronous thing fail?" (parsing, pure validation)
+- `Effect<A, E, R>` — anything async, or anything that needs services
+
+Rule of thumb: `Option` / `Either` in pure helpers; `Effect` the moment you touch a fetch, a store mutation, or `inject()`.
+
+### `Data.TaggedEnum` — discriminated unions without boilerplate
+
+```ts
+import { Data } from 'effect'
+
+type DraftState = Data.TaggedEnum<{
+  Local: { readonly data: DraftData }
+  Persisted: { readonly id: string; readonly data: DraftData }
+}>
+const DraftState = Data.taggedEnum<DraftState>()
+
+const s1 = DraftState.Local({ data: empty })
+const s2 = DraftState.Persisted({ id: 'abc', data: empty })
+
+// Exhaustive, compiler-checked match
+DraftState.$match(s1, {
+  Local: () => 'not saved yet',
+  Persisted: (p) => `saved as ${p.id}`,
+})
+```
+
+**Vue analogy:** the same pattern you'd model in a Pinia store as `type State = { status: 'Local', data: ... } | { status: 'Persisted', id: string, data: ... }` — except constructors, type guards, and the exhaustive matcher are generated for you. No more forgetting to handle the new variant you just added.
+
+### `Cause<E>` and `Exit<A, E>` — the full failure picture
+
+Every Effect ends with an `Exit<A, E>`:
+- `Exit.Success(a)` — normal path
+- `Exit.Failure(cause)` — something went wrong; `cause` is a `Cause<E>`
+
+A `Cause<E>` distinguishes:
+- **Expected failures** (`Fail<E>`) — your tagged errors, what callers handle
+- **Defects** — unexpected `throw`s, real bugs
+- **Interruptions** — a fiber was cancelled (closest Vue analogy: component unmounting before an `await` resolves)
+
+You rarely inspect `Cause` by hand — `Effect.catchTag`, `Effect.catchAll`, and `Effect.catchAllCause` do it for you. But the split is why Effect treats "expected error path" and "something exploded" as genuinely different things, instead of both being a raw `Error` caught in a single `try/catch`.
+
+---
+
+## Key Combinators — One-Line Reference
+
+| Operator | What it does | Promise/Vue analogy |
+|---|---|---|
+| `Effect.succeed(a)` | Lift a value into Effect | `Promise.resolve(a)` |
+| `Effect.fail(e)` | Produce a typed failure | `Promise.reject(e)` (but typed) |
+| `Effect.sync(() => x)` | Wrap a synchronous side-effect | A setter you want lazily evaluated |
+| `Effect.tryPromise(...)` | Bring a Promise into Effect | Wrapping `fetch`, `axios`, or any async SDK |
+| `Effect.map(eff, fn)` | Transform the success value | `.then(fn)` (sync fn) — or `computed()` over a value |
+| `Effect.flatMap(eff, fn)` | Chain another Effect | `.then(fn)` (fn returns a Promise) |
+| `Effect.all([a, b, c])` | Run in parallel, collect results | `Promise.all([a, b, c])` |
+| `Effect.catchTag('Tag', fn)` | Recover from one tagged error | `catch (e) { if (e._tag === 'Tag') ... }` |
+| `Effect.catchAll(fn)` | Recover from any typed error | `.catch(fn)` |
+| `Effect.mapError(fn)` | Transform the error channel | Rewrapping an error before re-throwing |
+| `Effect.tap(fn)` | Run a side-effect, keep the value | `.then(v => { log(v); return v })` |
+| `Effect.orElse(() => fallback)` | Fall back on failure | `.catch(() => fallback)` |
+
+Inside `.pipe(...)`, these stack. A long pipeline is just these operators composed top-to-bottom — structurally similar to chaining `.value` transformations through a series of `computed()` refs.
+
+---
+
 ## Architecture Mapping
 
 | Vue concept | TMS equivalent | File location |

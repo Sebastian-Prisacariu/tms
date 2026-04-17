@@ -327,12 +327,9 @@ const closeByKey = apiRuntime.fn(
   Effect.fnUntraced(function* (key: OverlayKey) {
     const registry = yield* Registry.AtomRegistry;
     const cur = registry.get(stack);
-    for (let i = cur.length - 1; i >= 0; i--) {
-      if (cur[i].key === key) {
-        registry.set(stack, [...cur.slice(0, i), ...cur.slice(i + 1)]);
-        return;
-      }
-    }
+    const idx = cur.findLastIndex((e) => e.key === key);
+    if (idx < 0) return;
+    registry.set(stack, [...cur.slice(0, idx), ...cur.slice(idx + 1)]);
   }),
 );
 
@@ -801,7 +798,7 @@ const createWithConflictRecovery = (input: CreateBookingInput) =>
         Effect.catchTag("BookingConflict", (err) =>
           Effect.sync(() =>
             bookingConflictDialog.open({ conflictId: err.bookingId }),
-          ).pipe(Effect.andThen(Effect.fail(err))),
+          ),
         ),
       );
   });
