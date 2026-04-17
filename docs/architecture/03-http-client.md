@@ -75,7 +75,7 @@ When auth tokens must be read at request time (not at layer construction time), 
 import { HttpClient, HttpClientRequest } from '@effect/platform'
 import { BrowserHttpClient } from '@effect/platform-browser'
 import { Config, Context, Effect, Layer, Schedule } from 'effect'
-import { AuthService } from '~/services/auth.service'
+import { AuthService } from '~/features/auth'
 
 export class ApiHttpClient extends Context.Tag('ApiHttpClient')<
   ApiHttpClient,
@@ -710,7 +710,7 @@ BookingApiLive                        DriverApiLive
 ```ts
 import { Layer } from "effect";
 import { ApiHttpClientLive } from "~/lib/http-client";
-import { AuthServiceLive } from "~/services/auth.service";
+import { AuthServiceLive } from "~/features/auth";
 import { BookingApiLive } from "~/features/booking/api/booking.api";
 import { DriverApiLive } from "~/features/driver/api/driver.api";
 
@@ -753,7 +753,7 @@ All of this is fully typed through the Effect type system. TypeScript knows the 
 | ------------------------------------------ | ----------------------------------------------------- |
 | `src/lib/http-client.ts`                   | `ApiHttpClient` tag + `ApiHttpClientLive` layer       |
 | `src/lib/runtime.ts`                       | `AppLayer` composition                                |
-| `src/services/auth.service.ts`             | `AuthService` — provides `getToken`                   |
+| `src/features/auth/`                       | `AuthService` — provides `getToken` (imported via barrel) |
 | `src/features/booking/api/booking.api.ts`  | `BookingApi` tag + `BookingApiLive` layer             |
 | `src/features/booking/contract/schemas.ts` | Effect Schema definitions for request/response shapes |
 | `src/features/booking/contract/errors.ts`  | Domain errors (`BookingNotFound`, etc.)               |

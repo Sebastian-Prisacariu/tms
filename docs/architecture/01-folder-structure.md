@@ -12,16 +12,13 @@ Every business domain gets its own folder under `src/features/`. Shared infrastr
 src/
 ├── features/
 │   ├── booking/                    # One feature = one domain
-│   │   ├── contract/               # Types, schemas, API contract
+│   │   ├── contract/               # Types, schemas, errors
 │   │   │   ├── schemas.ts          # Effect Schema for API payloads/responses
-│   │   │   ├── types.ts            # Shared TypeScript types (derived from schemas)
+│   │   │   ├── types.ts            # TypeScript types (derived from schemas)
 │   │   │   └── errors.ts           # Domain errors (Schema.TaggedError)
-│   │   ├── api/                    # HTTP calls to backend
-│   │   │   └── booking.api.ts      # BookingApi service using ApiHttpClient
-│   │   ├── state/                  # Atoms
-│   │   │   └── booking.atoms.ts    # Atom.make, Atom.readable, runtimeAtom.fn, etc.
-│   │   ├── hooks/                  # React hooks
-│   │   │   └── use-bookings.ts     # useAtomValue, useAtomSet wrappers
+│   │   ├── booking.api.ts          # BookingApi service (Context.Tag + Layer)
+│   │   ├── booking.atoms.ts        # Atom state (Atom.make, runtimeAtom.fn, etc.)
+│   │   ├── booking.hooks.ts        # React hooks (useAtomValue, useAtomSet wrappers)
 │   │   ├── components/             # Feature-specific UI
 │   │   │   ├── booking-list.tsx
 │   │   │   └── booking-form.tsx
@@ -29,9 +26,9 @@ src/
 │   │
 │   ├── driver/                     # Another feature
 │   │   ├── contract/
-│   │   ├── api/
-│   │   ├── state/
-│   │   ├── hooks/
+│   │   ├── driver.api.ts
+│   │   ├── driver.atoms.ts
+│   │   ├── driver.hooks.ts
 │   │   ├── components/
 │   │   └── index.ts
 │   │
@@ -58,9 +55,6 @@ src/
 │   ├── cn.ts                       # clsx + tailwind-merge utility
 │   └── runtime.ts                  # Atom.runtime setup with AppLayer
 │
-├── services/                       # Shared Effect services
-│   └── auth.service.ts             # AuthService (token management)
-│
 ├── routes/                         # TanStack Router file-based routes
 │   ├── __root.tsx                  # Root layout
 │   ├── _authenticated.tsx          # Auth guard layout
@@ -85,13 +79,13 @@ The **contract** defines the data shapes shared across the feature. Everything h
 - `types.ts` — Plain TypeScript types derived from schemas via `Schema.Type<typeof MySchema>`. Also enums, constants, and utility types.
 - `errors.ts` — Domain-specific errors using `Schema.TaggedError`. These flow through Effect's error channel.
 
-### `features/{name}/api/`
+### `features/{name}/{name}.api.ts`
 
-One file per resource. Each file defines an Effect **service** (via `Context.Tag`) that uses `ApiHttpClient` to call the backend. See [03-http-client.md](./03-http-client.md).
+The Effect **service** for this feature — a `Context.Tag` (interface) + `Layer.effect` (implementation) that uses `ApiHttpClient` to call the backend. See [03-http-client.md](./03-http-client.md).
 
-### `features/{name}/state/`
+### `features/{name}/{name}.atoms.ts`
 
-Atom definitions grouped by concern. Files are named `{concern}.atoms.ts`. All atoms for a feature are exported as a single namespace object:
+Atom definitions for the feature. All atoms are exported as a single namespace object:
 
 ```ts
 export const Booking = { list, detail, filters, create, update }
@@ -99,9 +93,9 @@ export const Booking = { list, detail, filters, create, update }
 
 See [04-state-management.md](./04-state-management.md) for all atom patterns.
 
-### `features/{name}/hooks/`
+### `features/{name}/{name}.hooks.ts`
 
-React hooks that bridge atoms to components. Hooks use `useAtomValue`, `useAtomSet`, `useAtom` from `@effect-atom/atom-react`. They provide a clean API surface for components:
+React hooks that bridge atoms to components. Hooks use `useAtomValue`, `useAtomSet`, `useAtom` from `@effect-atom/atom-react`:
 
 ```ts
 export function useBookings() {
@@ -113,46 +107,72 @@ export function useBookings() {
 
 ### `features/{name}/components/`
 
-Feature-specific React components. They import hooks from `../hooks/` and UI primitives from `~/components/ui/`. They never import atoms directly — always go through hooks.
+Feature-specific React components. They import hooks from `../{name}.hooks` and UI primitives from `~/components/ui/`. They never import atoms directly — always go through hooks.
+
+### Growing into directories
+
+Start flat. When a concern has 3+ files, create a directory for it:
+
+```
+# Before: one atoms file → flat
+booking/
+  booking.atoms.ts
+
+# After: multiple atoms files → directory
+booking/
+  state/
+    booking-list.atoms.ts
+    booking-detail.atoms.ts
+    booking-mutations.atoms.ts
+```
+
+Same applies to API (multiple endpoints), hooks (multiple hooks), etc.
 
 ### `features/{name}/index.ts`
 
-Barrel export. Exposes the feature's **public API** — components meant to be embedded by routes or other features, plus re-exports from `contract/`.
+The barrel export is the feature's **public API**. Other features, routes, and shared code import from here — never from internal files. The barrel can export anything the feature wants to make public: types, schemas, errors, service Tags, components.
 
 ```ts
 // features/booking/index.ts
 
-// Public components — can be rendered by routes or other features
+// Types and schemas
+export type { Booking, BookingId, BookingStatus, CreateBookingInput } from './contract/types'
+export { BookingSchema, BookingIdSchema } from './contract/schemas'
+
+// Errors
+export { BookingNotFound, BookingConflict } from './contract/errors'
+
+// Service Tags (interface only — NOT the Layer implementation)
+export { BookingApi } from './api/booking.api'
+
+// Public components
 export { BookingList } from './components/booking-list'
 export { BookingForm } from './components/booking-form'
 export { BookingStatusBadge } from './components/booking-status-badge'
-
-// Re-export contract — types, schemas, errors are always available
-export type { Booking, BookingId, BookingStatus, CreateBookingInput } from './contract/types'
-export { BookingSchema, BookingIdSchema } from './contract/schemas'
-export { BookingNotFound } from './contract/errors'
 ```
+
+**What goes in the barrel:**
+- Types, schemas, errors, constants — always safe
+- Service Tags (`Context.Tag`) — just an interface, no runtime coupling
+- Reusable components — widgets other features might embed
+
+**What stays out:**
+- Layer implementations (`BookingApiLive`) — wired up in `runtime.ts`, not imported by features
+- Atoms — internal reactivity
+- Hooks — depend on internal atoms
+- Internal components — not meant for reuse
 
 ## Import Rules
 
-In a TMS, domains are interconnected — a booking references drivers and vehicles, route planning references all three. Features **can** import from each other, but only through controlled boundaries.
-
-### Two-Tier Export System
-
-Each feature has two public boundaries:
-
-| Tier | Import path | What's exposed | When to use |
-|---|---|---|---|
-| **Contract** | `~/features/driver/contract/schemas` | Types, schemas, errors, constants | You need a type or schema from another feature (e.g., `DriverId` in a booking form) |
-| **Barrel** | `~/features/driver` (index.ts) | Contract re-exports + public components | You need to render another feature's component (e.g., `DriverSelect` in a booking form) |
+One rule: **features import from each other's `index.ts` barrel. Never from internal files.**
 
 ### What is allowed
 
 ```ts
 // features/booking/contract/schemas.ts
-// ✅ Import types/schemas from another feature's contract
-import { DriverId } from '~/features/driver/contract/schemas'
-import { VehicleId } from '~/features/vehicle/contract/schemas'
+// ✅ Import types from another feature's barrel
+import { DriverId } from '~/features/driver'
+import { VehicleId } from '~/features/vehicle'
 
 export const BookingSchema = Schema.Struct({
   id: BookingId,
@@ -170,7 +190,6 @@ import { DriverSelect } from '~/features/driver'
 function BookingForm() {
   return (
     <form>
-      {/* DriverSelect is a public component exported from the driver feature */}
       <DriverSelect onSelect={handleDriverSelect} />
       {/* ... */}
     </form>
@@ -178,61 +197,95 @@ function BookingForm() {
 }
 ```
 
+```ts
+// features/booking/booking.api.ts
+// ✅ Import a service Tag from another feature's barrel (it's just an interface)
+import { AuthService } from '~/features/auth'
+
+const BookingApiLive = Layer.effect(
+  BookingApi,
+  Effect.gen(function* () {
+    const auth = yield* AuthService   // use the Tag — implementation is wired elsewhere
+    const client = yield* ApiHttpClient
+    // ...
+  })
+)
+```
+
 ### What is NOT allowed
 
 ```ts
-// ❌ Importing another feature's API service
-import { DriverApi } from '~/features/driver/api/driver.api'
-
-// ❌ Importing another feature's atoms
-import { Driver } from '~/features/driver/state/driver.atoms'
-
-// ❌ Importing another feature's hooks
-import { useDrivers } from '~/features/driver/hooks/use-drivers'
-
-// ❌ Importing an internal component not exported from index.ts
+// ❌ Importing from internal files — always go through the barrel
+import { DriverApi } from '~/features/driver/driver.api'
+import { Driver } from '~/features/driver/driver.atoms'
+import { useDrivers } from '~/features/driver/driver.hooks'
 import { DriverRow } from '~/features/driver/components/driver-row'
 ```
 
-### Why this boundary?
+The rule is simple: if it's not in `index.ts`, it's private. No exceptions, no per-directory rules to remember.
 
-| Layer | Cross-feature import? | Reason |
+### Why barrel-only?
+
+The barrel export acts as a **deliberate public API**. A feature author decides what to expose. Everything else is an implementation detail that can change without breaking other features.
+
+| Exported from barrel | Safe to import? | Why |
 |---|---|---|
-| `contract/` (types, schemas, errors) | **Yes** | Types are stable, have no runtime behavior, and no dependencies. `DriverId` is just a branded string — it doesn't pull in the driver feature's React components or API calls. |
-| `index.ts` (public components) | **Yes, curated** | A `DriverSelect` dropdown is a reusable widget. But only explicitly exported components — internal components like `DriverRow` stay private. |
-| `api/` (Effect services) | **No** | If booking needs driver data, it should call its own backend endpoint (e.g., `GET /bookings/:id` returns driver info) or use a shared service in `~/services/`. Features shouldn't call each other's APIs — that creates hidden coupling. |
-| `state/` (atoms) | **No** | Atoms are internal reactivity. If two features need shared reactive state, use a shared service or lift the atom to `~/lib/`. |
-| `hooks/` (React hooks) | **No** | Hooks depend on feature-internal atoms. Cross-feature hook usage creates deep coupling to another feature's state implementation. |
+| Types, schemas, errors | Yes | Pure data shapes — zero runtime behavior |
+| Service Tags (`Context.Tag`) | Yes | Just an interface identifier — no implementation pulled in. The Layer is wired separately in `runtime.ts` |
+| Public components | Yes | Reusable widgets — self-contained with their own hooks/state |
+| Layer implementations | **Never export** | Creates hard coupling to another feature's dependency graph |
+| Atoms | **Never export** | Creates shared mutable state across features — impossible to reason about |
+| Hooks | **Never export** | Depend on internal atoms — coupling to state implementation |
 
-### Full Import Matrix
+### Enforcing the rule
+
+Use `eslint-plugin-boundaries` to enforce barrel-only imports at CI time:
+
+```json
+// .eslintrc.json (simplified)
+{
+  "rules": {
+    "boundaries/element-types": [2, {
+      "default": "disallow",
+      "rules": [
+        {
+          "from": "features/*",
+          "allow": ["features/*/index.ts", "lib/*", "components/ui/*", "hooks/*"]
+        }
+      ]
+    }]
+  }
+}
+```
+
+### Import Matrix
 
 | From | Can import from | Cannot import from |
 |---|---|---|
-| `features/booking/contract/` | Other features' `contract/` dirs, `~/lib/*`, `~/services/*` | Other features' `api/`, `state/`, `hooks/`, `components/` |
-| `features/booking/api/` | Own `contract/`, other features' `contract/`, `~/lib/*`, `~/services/*` | Other features' `api/`, `state/`, `hooks/` |
-| `features/booking/state/` | Own `contract/`, own `api/`, `~/lib/*`, `~/services/*` | Other features (any dir) |
-| `features/booking/hooks/` | Own `contract/`, own `state/`, `~/lib/*`, `~/hooks/*` | Other features (any dir) |
-| `features/booking/components/` | Own `hooks/`, own `contract/`, other features' `index.ts` (barrel), `~/components/ui/*`, `~/hooks/*`, `~/lib/*` | Other features' internals |
-| `routes/` | Any feature's `index.ts` (barrel only), `~/lib/*`, `~/components/ui/*` | Feature internals |
-| `lib/` | `~/services/*`, external packages | `~/features/*` |
-| `components/ui/` | `~/lib/cn`, external packages | `~/features/*`, `~/services/*` |
+| Any feature | Other features' `index.ts` (barrel), `~/lib/*`, `~/components/ui/*`, `~/hooks/*` | Other features' internal files |
+| `routes/` | Any feature's `index.ts`, `~/lib/*`, `~/components/ui/*` | Feature internals |
+| `lib/` | External packages | `~/features/*` |
+| `components/ui/` | `~/lib/cn`, external packages | `~/features/*` |
 
-### When to extract to shared
+### When to extract to `~/lib/`
 
-If you find yourself importing the same type from `features/driver/contract/` in 4+ other features, consider whether it belongs in `~/services/` or `~/lib/` instead. Common candidates:
+If a type or utility is used by nearly every feature, consider moving it to `~/lib/` instead of keeping it in a feature barrel:
 
 - `~/lib/types.ts` — shared ID types used everywhere (`TenantId`, `UserId`)
-- `~/services/address.service.ts` — address lookup used by booking, driver, vehicle, route-planning
+- `~/lib/address.ts` — address utilities used by booking, driver, vehicle, route-planning
+
+Everything else — including auth, config, and other services — is a feature with its own barrel export. Auth has a login page, profile settings, and session management; config might have an admin panel. They're features that happen to also export service Tags.
 
 ## File Naming Conventions
 
 | Type | Convention | Example |
 |---|---|---|
+| API service | `{feature}.api.ts` | `booking.api.ts` |
+| Atoms | `{feature}.atoms.ts` | `booking.atoms.ts` |
+| Hooks | `{feature}.hooks.ts` | `booking.hooks.ts` |
 | Components | `kebab-case.tsx` | `booking-list.tsx` |
-| Hooks | `use-{name}.ts` | `use-bookings.ts` |
-| Atoms | `{concern}.atoms.ts` | `booking.atoms.ts` |
-| API services | `{resource}.api.ts` | `booking.api.ts` |
-| Schemas | `schemas.ts` | `schemas.ts` |
-| Effect services | `{name}.service.ts` | `auth.service.ts` |
+| Schemas | `schemas.ts` | `contract/schemas.ts` |
+| Errors | `errors.ts` | `contract/errors.ts` |
+| Types | `types.ts` | `contract/types.ts` |
 | Tests (unit) | `{name}.test.ts` | `booking.api.test.ts` |
 | Tests (e2e) | `{name}.e2e.ts` | `booking-flow.e2e.ts` |
